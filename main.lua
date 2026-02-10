@@ -10,6 +10,10 @@ local get_yanked_paths = ya.sync(function(state)
 	return paths
 end)
 
+local get_cwd = ya.sync(function(state)
+	return tostring(cx.active.current.cwd)
+end)
+
 local M = {
 	notify_unknown_display_server = false,
 }
@@ -21,7 +25,7 @@ function M:entry(job)
 	if job.args.action == "copy" then
 		return self:copy()
 	elseif job.args.action == "paste" then
-		return self:notify_error("Paste action is not implemented yet")
+		return self:paste()
 	else
 		return self:notify_error("Unknown action: " .. tostring(job.args.action))
 	end
@@ -35,8 +39,15 @@ function M:copy()
 	end
 
 	local cmd, err = nil, nil
+	local args = paths
 	if ya.target_os() == "linux" then
 		cmd, err = self:copy_linux_cmd()
+		if cmd then
+			args = {}
+			for _, p in ipairs(paths) do
+				table.insert(args, self:path_to_file_uri(p))
+			end
+		end
 	elseif ya.target_os() == "macos" then
 		cmd, err = self:copy_macos_cmd()
 	else
@@ -50,7 +61,7 @@ function M:copy()
 	end
 
 	ya.dbg("Clipboard", "cmd", cmd)
-	local cmd = Command("sh"):arg({ "-c", cmd, "--" }):arg(paths)
+	local cmd = Command("sh"):arg({ "-c", cmd, "--" }):arg(args)
 	local output, err = cmd:output()
 	if err then
 		ya.err("Clipboard", "cmd failed", err)
@@ -126,7 +137,7 @@ function M:copy_x11_cmd()
 	if not (status and status.success) then
 		return nil, "xclip not found"
 	end
-	return [[echo "$@" | xclip -i -selection clipboard -t text/uri-list]], nil
+	return [[printf '%s\r\n' "$@" | xclip -i -selection clipboard -t text/uri-list]], nil
 end
 
 function M:copy_wayland_cmd()
@@ -138,7 +149,298 @@ function M:copy_wayland_cmd()
 	if not (status and status.success) then
 		return nil, "wl-copy not found"
 	end
-	return [[for path in "$@"; do echo "file://$path"; done | wl-copy -t text/uri-list]], nil
+	return [[printf '%s\r\n' "$@" | wl-copy -t text/uri-list]], nil
+end
+
+function M:paste()
+	local paths, err = nil, nil
+	if ya.target_os() == "linux" then
+		paths, err = self:paste_linux()
+	elseif ya.target_os() == "macos" then
+		paths, err = self:paste_macos()
+	else
+		err = "Unsupported OS: " .. ya.target_os()
+	end
+	if not self.notify_unknown_display_server and err == "Unknown display server" then
+		return
+	end
+	if err then
+		return self:notify_error("Paste failed: " .. err)
+	end
+	if not paths or #paths == 0 then
+		return self:notify_error("No files in clipboard")
+	end
+
+	ya.dbg("Clipboard", "paste paths", paths)
+
+	local cwd_url = Url(get_cwd())
+	local copied = 0
+	local skipped = 0
+	local errors = {}
+	local apply_all = nil
+	for _, src in ipairs(paths) do
+		local name = src:match("[^/]+$")
+		if name then
+			local dest_url = cwd_url:join(name)
+			local dest = tostring(dest_url)
+
+			local existing = fs.cha(dest_url)
+			if existing then
+				local choice = apply_all
+				if not choice then
+					choice, apply_all = self:ask_conflict(name, #paths > 1)
+				end
+				if choice == "skip" then
+					skipped = skipped + 1
+					goto continue
+				elseif choice == "rename" then
+					dest = self:unique_name(cwd_url, name)
+				end
+			end
+
+			local ok, copy_err = self:copy_path(src, dest)
+			if ok then
+				copied = copied + 1
+			else
+				ya.err("Clipboard", "copy failed", src, tostring(copy_err))
+				table.insert(errors, name .. ": " .. tostring(copy_err))
+			end
+			::continue::
+		end
+	end
+
+	if copied > 0 or skipped > 0 then
+		local parts = {}
+		if copied > 0 then
+			table.insert(parts, "Pasted " .. copied .. " file(s)")
+		end
+		if skipped > 0 then
+			table.insert(parts, "Skipped " .. skipped .. " file(s)")
+		end
+		ya.notify({
+			title = "Clipboard",
+			content = table.concat(parts, ", "),
+			timeout = 3,
+			level = "info",
+		})
+	end
+	if #errors > 0 then
+		self:notify_error("Failed to paste:\n" .. table.concat(errors, "\n"))
+	end
+end
+
+function M:ask_conflict(name, multiple)
+	local prompt = name .. " exists: (o)verwrite (r)ename (s)kip"
+	if multiple then
+		prompt = prompt .. " (O/R/S=apply to all)"
+	end
+	local value, event = ya.input({
+		title = prompt,
+		pos = { "center", w = #prompt + 4 },
+	})
+	if event ~= 1 or not value or value == "" then
+		return "skip", nil
+	end
+	local c = value:sub(1, 1)
+	local apply_all = nil
+	if multiple and c == c:upper() then
+		c = c:lower()
+		if c == "o" then
+			apply_all = "overwrite"
+		elseif c == "r" then
+			apply_all = "rename"
+		elseif c == "s" then
+			apply_all = "skip"
+		end
+	end
+	if c == "o" then
+		return "overwrite", apply_all
+	elseif c == "r" then
+		return "rename", apply_all
+	else
+		return "skip", apply_all
+	end
+end
+
+function M:unique_name(cwd_url, name)
+	local base, ext = name:match("^(.+)(%.[^.]+)$")
+	if not base then
+		base = name
+		ext = ""
+	end
+	local i = 1
+	while true do
+		local candidate = base .. " (" .. i .. ")" .. ext
+		local candidate_url = cwd_url:join(candidate)
+		if not fs.cha(candidate_url) then
+			return tostring(candidate_url)
+		end
+		i = i + 1
+	end
+end
+
+function M:copy_path(src, dest)
+	local src_url = Url(src)
+	local dest_url = Url(dest)
+	local cha, err = fs.cha(src_url)
+	if not cha then
+		return false, "cannot stat: " .. tostring(err)
+	end
+
+	if cha.is_dir then
+		return self:copy_dir(src_url, dest_url)
+	else
+		local ok, copy_err = fs.copy(src_url, dest_url)
+		if ok then
+			return true, nil
+		else
+			return false, tostring(copy_err)
+		end
+	end
+end
+
+function M:copy_dir(src_url, dest_url)
+	local ok, err = fs.create("dir_all", dest_url)
+	if not ok then
+		return false, "mkdir failed: " .. tostring(err)
+	end
+
+	local entries, read_err = fs.read_dir(src_url, {})
+	if not entries then
+		return false, "read_dir failed: " .. tostring(read_err)
+	end
+
+	for _, entry in ipairs(entries) do
+		local child_dest = dest_url:join(entry.name)
+		if entry.cha.is_dir then
+			local ok, dir_err = self:copy_dir(entry.url, child_dest)
+			if not ok then
+				return false, dir_err
+			end
+		else
+			local ok, copy_err = fs.copy(entry.url, child_dest)
+			if not ok then
+				return false, tostring(copy_err)
+			end
+		end
+	end
+
+	return true, nil
+end
+
+function M:paste_macos()
+	local cmd = Command("osascript"):arg({
+		"-e",
+		[[
+use framework "Foundation"
+use framework "AppKit"
+use scripting additions
+
+set pasteboard to (current application's NSPasteboard's generalPasteboard())
+set urlArray to (pasteboard's readObjectsForClasses_options_({current application's |NSURL|}, missing value))
+
+if urlArray is missing value then return ""
+
+set pathList to {}
+repeat with u in urlArray
+  set end of pathList to (u's |path|() as text)
+end repeat
+
+set AppleScript's text item delimiters to (character id 0)
+return pathList as text
+]],
+	})
+	local output, err = cmd:output()
+	if err then
+		ya.err("Clipboard", "paste macos failed", err)
+		return nil, "osascript failed: " .. tostring(err)
+	end
+	if not output or output.status.code ~= 0 then
+		return nil, "osascript exited with code " .. tostring(output and output.status.code)
+	end
+
+	local stdout = output.stdout
+	if not stdout then
+		return {}, nil
+	end
+	stdout = stdout:gsub("%s+$", "")
+	if stdout == "" then
+		return {}, nil
+	end
+	local paths = {}
+	for path in stdout:gmatch("[^%z]+") do
+		path = path:gsub("%s+$", "")
+		if path ~= "" then
+			table.insert(paths, path)
+		end
+	end
+	return paths, nil
+end
+
+function M:paste_linux()
+	if self:linux_display_server() == "x11" then
+		return self:paste_x11()
+	elseif self:linux_display_server() == "wayland" then
+		return self:paste_wayland()
+	else
+		return nil, "Unknown display server"
+	end
+end
+
+function M:paste_x11()
+	local status, err = Command("which"):arg("xclip"):status()
+	if err or not (status and status.success) then
+		return nil, "xclip not found"
+	end
+	local output, err = Command("xclip"):arg({ "-o", "-selection", "clipboard", "-t", "text/uri-list" }):output()
+	if err then
+		return nil, "xclip failed: " .. tostring(err)
+	end
+	if not output or output.status.code ~= 0 then
+		return {}, nil
+	end
+	return self:parse_uri_list(output.stdout), nil
+end
+
+function M:paste_wayland()
+	local status, err = Command("which"):arg("wl-paste"):status()
+	if err or not (status and status.success) then
+		return nil, "wl-paste not found"
+	end
+	local output, err = Command("wl-paste"):arg({ "-t", "text/uri-list" }):output()
+	if err then
+		return nil, "wl-paste failed: " .. tostring(err)
+	end
+	if not output or output.status.code ~= 0 then
+		return {}, nil
+	end
+	return self:parse_uri_list(output.stdout), nil
+end
+
+function M:parse_uri_list(text)
+	if not text or text == "" then
+		return {}
+	end
+	local paths = {}
+	for line in text:gmatch("[^\r\n]+") do
+		if line:sub(1, 1) ~= "#" then
+			local path = line:match("^file://[^/]*(/.+)")
+			if path then
+				path = path:gsub("%%(%x%x)", function(hex)
+					return string.char(tonumber(hex, 16))
+				end)
+				table.insert(paths, path)
+			end
+		end
+	end
+	return paths
+end
+
+function M:path_to_file_uri(path)
+	local encoded = path:gsub("([^A-Za-z0-9/_.~-])", function(c)
+		return string.format("%%%02X", string.byte(c))
+	end)
+	return "file://" .. encoded
 end
 
 function M:notify_error(msg)

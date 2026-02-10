@@ -21,12 +21,16 @@ This clones the repository, adds it to `~/.config/yazi/package.toml`, and pins t
 
 ## Usage
 
-Add a shortcut in `~/.config/yazi/keymap.toml`:
+Add shortcuts in `~/.config/yazi/keymap.toml`:
 
 ```toml
 [[mgr.prepend_keymap]]
 on  = "y"
 run = [ "yank", 'plugin clipboard -- --action=copy' ]
+
+[[mgr.prepend_keymap]]
+on  = "<C-p>"
+run = [ 'plugin clipboard -- --action=paste' ]
 ```
 
 ## Optional arguments

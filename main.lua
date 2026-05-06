@@ -62,13 +62,33 @@ function M:copy()
 
 	ya.dbg("Clipboard", "cmd", cmd)
 	local cmd = Command("sh"):arg({ "-c", cmd, "--" }):arg(args)
-	local output, err = cmd:output()
-	if err then
-		ya.err("Clipboard", "cmd failed", err)
-		return self:notify_error("Run command failed: " .. tostring(err))
-	end
-	if output then
-		ya.dbg("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
+
+	-- On Wayland, wl-copy forks to background but keeps stderr open,
+	-- causing output() to block until the forked process exits.
+	-- Use spawn() with stderr NULL to avoid blocking.
+	if ya.target_os() == "linux" and self:linux_display_server() == "wayland" then
+		local child, err = cmd:stderr(Command.NULL):spawn()
+		if err then
+			ya.err("Clipboard", "cmd failed", err)
+			return self:notify_error("Run command failed: " .. tostring(err))
+		end
+		local status, err = child:wait()
+		if err then
+			ya.err("Clipboard", "cmd wait failed", err)
+			return self:notify_error("Run command failed: " .. tostring(err))
+		end
+		if status then
+			ya.dbg("Clipboard", "cmd status", status.code)
+		end
+	else
+		local output, err = cmd:output()
+		if err then
+			ya.err("Clipboard", "cmd failed", err)
+			return self:notify_error("Run command failed: " .. tostring(err))
+		end
+		if output then
+			ya.dbg("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
+		end
 	end
 end
 

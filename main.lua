@@ -65,52 +65,30 @@ function M:copy()
 	ya.dbg("Clipboard", "cmd", cmd)
 
 	if ya.target_os() == "windows" then
-		local output, err = Command("powershell.exe")
-			:arg({ "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
-			:stdout(Command.PIPED)
-			:stderr(Command.PIPED)
-			:output()
+		local _, err = self:run_command("powershell.exe", { "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
 		if err then
-			ya.err("Clipboard", "cmd failed", err)
-			return self:notify_error("Run command failed: " .. tostring(err))
+			return self:notify_error(err)
 		end
-		if not output or not output.status.success then
-			ya.err("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
-			return self:notify_error(
-				"Run command failed: powershell exited with code " .. tostring(output and output.status.code)
-			)
-		end
-		ya.dbg("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
 		return
 	end
 
-	local cmd = Command("sh"):arg({ "-c", cmd, "--" }):arg(args)
+	local sh_args = { "-c", cmd, "--" }
+	for _, arg in ipairs(args) do
+		table.insert(sh_args, arg)
+	end
 
 	-- On Wayland, wl-copy forks to background but keeps stderr open,
 	-- causing output() to block until the forked process exits.
-	-- Use spawn() with stderr NULL to avoid blocking.
+	-- Set stdout/stderr NULL to avoid blocking.
 	if ya.target_os() == "linux" and self:linux_display_server() == "wayland" then
-		local child, err = cmd:stderr(Command.NULL):spawn()
+		local _, err = self:run_command("sh", sh_args, { stdout = Command.NULL, stderr = Command.NULL })
 		if err then
-			ya.err("Clipboard", "cmd failed", err)
-			return self:notify_error("Run command failed: " .. tostring(err))
-		end
-		local status, err = child:wait()
-		if err then
-			ya.err("Clipboard", "cmd wait failed", err)
-			return self:notify_error("Run command failed: " .. tostring(err))
-		end
-		if status then
-			ya.dbg("Clipboard", "cmd status", status.code)
+			return self:notify_error(err)
 		end
 	else
-		local output, err = cmd:output()
+		local _, err = self:run_command("sh", sh_args)
 		if err then
-			ya.err("Clipboard", "cmd failed", err)
-			return self:notify_error("Run command failed: " .. tostring(err))
-		end
-		if output then
-			ya.dbg("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
+			return self:notify_error(err)
 		end
 	end
 end
@@ -171,25 +149,49 @@ function M:linux_display_server()
 	return "unknown"
 end
 
-function M:copy_x11_cmd()
-	local status, err = Command("which"):arg("xclip"):status()
-	if err then
-		ya.err("Clipboard", "which xclip failed", err)
-		return nil, "xclip not found"
+function M:run_command(program, args, opts)
+	opts = opts or {}
+	local cmd = Command(program):stdout(opts.stdout or Command.PIPED):stderr(opts.stderr or Command.PIPED)
+	if args then
+		cmd = cmd:arg(args)
 	end
-	if not (status and status.success) then
+
+	local output, err = cmd:output()
+	if err then
+		ya.err("Clipboard", program .. " failed", err)
+		return nil, "Run command failed: " .. tostring(err)
+	end
+	if not (output and output.status.success) then
+		if output then
+			ya.err("Clipboard", program .. " failed", output.status.code, output.stdout, output.stderr)
+		end
+		return nil,
+			"Run command failed: "
+				.. program
+				.. " exited with code "
+				.. tostring(output and output.status.code)
+				.. ", stdout: "
+				.. tostring(output and output.stdout)
+				.. ", stderr: "
+				.. tostring(output and output.stderr)
+	end
+	return output, nil
+end
+
+function M:command_exists(program)
+	local output = self:run_command("which", program)
+	return output ~= nil
+end
+
+function M:copy_x11_cmd()
+	if not self:command_exists("xclip") then
 		return nil, "xclip not found"
 	end
 	return [[printf '%s\r\n' "$@" | xclip -i -selection clipboard -t text/uri-list]], nil
 end
 
 function M:copy_wayland_cmd()
-	local status, err = Command("which"):arg("wl-copy"):status()
-	if err then
-		ya.err("Clipboard", "which wl-copy failed", err)
-		return nil, "wl-copy not found"
-	end
-	if not (status and status.success) then
+	if not self:command_exists("wl-copy") then
 		return nil, "wl-copy not found"
 	end
 	return [[printf '%s\r\n' "$@" | wl-copy -t text/uri-list]], nil
@@ -403,7 +405,7 @@ function M:copy_dir(src_url, dest_url)
 end
 
 function M:paste_macos()
-	local cmd = Command("osascript"):arg({
+	local output, err = self:run_command("osascript", {
 		"-e",
 		[[
 use framework "Foundation"
@@ -424,20 +426,11 @@ set AppleScript's text item delimiters to (character id 0)
 return pathList as text
 ]],
 	})
-	local output, err = cmd:output()
 	if err then
-		ya.err("Clipboard", "paste macos failed", err)
-		return nil, "osascript failed: " .. tostring(err)
-	end
-	if not output or output.status.code ~= 0 then
-		return nil, "osascript exited with code " .. tostring(output and output.status.code)
+		return nil, err
 	end
 
-	local stdout = output.stdout
-	if not stdout then
-		return {}, nil
-	end
-	stdout = stdout:gsub("%s+$", "")
+	local stdout = (output.stdout or ""):gsub("%s+$", "")
 	if stdout == "" then
 		return {}, nil
 	end
@@ -462,37 +455,29 @@ function M:paste_linux()
 end
 
 function M:paste_x11()
-	local status, err = Command("which"):arg("xclip"):status()
-	if err or not (status and status.success) then
+	if not self:command_exists("xclip") then
 		return nil, "xclip not found"
 	end
-	local output, err = Command("xclip"):arg({ "-o", "-selection", "clipboard", "-t", "text/uri-list" }):output()
+	local output, err = self:run_command("xclip", { "-o", "-selection", "clipboard", "-t", "text/uri-list" })
 	if err then
-		return nil, "xclip failed: " .. tostring(err)
-	end
-	if not output or output.status.code ~= 0 then
-		return {}, nil
+		return nil, err
 	end
 	return self:parse_uri_list(output.stdout), nil
 end
 
 function M:paste_wayland()
-	local status, err = Command("which"):arg("wl-paste"):status()
-	if err or not (status and status.success) then
+	if not self:command_exists("wl-paste") then
 		return nil, "wl-paste not found"
 	end
-	local output, err = Command("wl-paste"):arg({ "-t", "text/uri-list" }):output()
+	local output, err = self:run_command("wl-paste", { "-t", "text/uri-list" })
 	if err then
-		return nil, "wl-paste failed: " .. tostring(err)
-	end
-	if not output or output.status.code ~= 0 then
-		return {}, nil
+		return nil, err
 	end
 	return self:parse_uri_list(output.stdout), nil
 end
 
 function M:paste_windows()
-	local cmd = Command("powershell.exe"):arg({
+	local output, err = self:run_command("powershell.exe", {
 		"-NoProfile",
 		"-NonInteractive",
 		"-Sta",
@@ -505,12 +490,8 @@ if ($files.Count -gt 0) {
 }
 ]],
 	})
-	local output, err = cmd:output()
 	if err then
-		return nil, "powershell failed: " .. tostring(err)
-	end
-	if not output or not output.status.success then
-		return nil, "powershell exited with code " .. tostring(output and output.status.code)
+		return nil, err
 	end
 
 	local stdout = (output.stdout or ""):gsub("%s+$", "")

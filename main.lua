@@ -65,15 +65,15 @@ function M:copy()
 	ya.dbg("Clipboard", "cmd", cmd)
 
 	if ya.target_os() == "windows" then
-    	local output, err = Command("powershell.exe")
-    		:arg({ "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
-    		:stdout(Command.PIPED)
-    		:stderr(Command.PIPED)
-    		:output()
-    	if err then
-    		ya.err("Clipboard", "cmd failed", err)
-    		return self:notify_error("Run command failed: " .. tostring(err))
-    	end
+		local output, err = Command("powershell.exe")
+			:arg({ "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
+			:stdout(Command.PIPED)
+			:stderr(Command.PIPED)
+			:output()
+		if err then
+			ya.err("Clipboard", "cmd failed", err)
+			return self:notify_error("Run command failed: " .. tostring(err))
+		end
 		if not output or not output.status.success then
 			ya.err("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
 			return self:notify_error(

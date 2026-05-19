@@ -51,7 +51,7 @@ function M:copy()
 	elseif ya.target_os() == "macos" then
 		cmd, err = self:copy_macos_cmd()
 	elseif ya.target_os() == "windows" then
-		cmd, err = self:copy_windows_cmd()
+		cmd, err = self:copy_windows_cmd(args)
 	else
 		err = "Unsupported OS: " .. ya.target_os()
 	end
@@ -65,28 +65,15 @@ function M:copy()
 	ya.dbg("Clipboard", "cmd", cmd)
 
 	if ya.target_os() == "windows" then
-		local child, err = Command("powershell.exe")
-			:arg({ "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
-			:stdin(Command.PIPED)
-			:stdout(Command.PIPED)
-			:stderr(Command.PIPED)
-			:spawn()
-		if err then
-			ya.err("Clipboard", "cmd failed", err)
-			return self:notify_error("Run command failed: " .. tostring(err))
-		end
-
-		local ok, write_err = child:write_all(table.concat(args, "\n"))
-		if not ok then
-			ya.err("Clipboard", "cmd write failed", write_err)
-			return self:notify_error("Run command failed: " .. tostring(write_err))
-		end
-
-		local output, err = child:wait_with_output()
-		if err then
-			ya.err("Clipboard", "cmd wait failed", err)
-			return self:notify_error("Run command failed: " .. tostring(err))
-		end
+    	local output, err = Command("powershell.exe")
+    		:arg({ "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
+    		:stdout(Command.PIPED)
+    		:stderr(Command.PIPED)
+    		:output()
+    	if err then
+    		ya.err("Clipboard", "cmd failed", err)
+    		return self:notify_error("Run command failed: " .. tostring(err))
+    	end
 		if not output or not output.status.success then
 			ya.err("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
 			return self:notify_error(
@@ -208,17 +195,31 @@ function M:copy_wayland_cmd()
 	return [[printf '%s\r\n' "$@" | wl-copy -t text/uri-list]], nil
 end
 
-function M:copy_windows_cmd()
-	local cmd = [[
+function M:copy_windows_cmd(paths)
+	local tmp = os.getenv("TEMP") .. "\\clipboard_yazi_" .. os.time() .. ".txt"
+	local f = io.open(tmp, "w")
+	if not f then
+		return nil, "Failed to create temp file: " .. tmp
+	end
+	f:write(table.concat(paths, "\n"))
+	f:close()
+
+	local tmp_ps = tmp:gsub("'", "''")
+	local cmd = string.format(
+		[[
 Add-Type -AssemblyName System.Windows.Forms
 $col = [System.Collections.Specialized.StringCollection]::new()
-foreach ($path in $input) {
-  if ($path.Length -gt 0) {
-    $null = $col.Add($path)
+Get-Content '%s' | ForEach-Object {
+  if ($_.Length -gt 0) {
+    $null = $col.Add($_)
   }
 }
+Remove-Item '%s' -ErrorAction SilentlyContinue
 [System.Windows.Forms.Clipboard]::SetFileDropList($col)
-]]
+]],
+		tmp_ps,
+		tmp_ps
+	)
 	return cmd, nil
 end
 

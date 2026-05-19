@@ -1,6 +1,6 @@
 # clipboard.yazi
 
-Synchronize files between the Yazi file manager and your system clipboard. Supports both copy and paste on Linux, macOS, and Windows.
+Synchronize files between the Yazi file manager and your system clipboard. Supports both copy and paste on Linux, macOS, and Windows desktops.
 
 ## Features
 
@@ -10,19 +10,17 @@ Synchronize files between the Yazi file manager and your system clipboard. Suppo
 ## Requirements
 
 | Platform | Copy | Paste |
-| --- | --- | --- |
+| -------- | ---- | ----- |
 | Linux (X11) | `xclip` | `xclip` |
 | Linux (Wayland) | `wl-copy` (`wl-clipboard`) | `wl-paste` (`wl-clipboard`) |
 | macOS | Built-in `osascript` | Built-in `osascript` |
-| Windows | Built-in `powershell` | Built-in `powershell` |
-
-Windows support uses `powershell.exe` (Windows PowerShell 5.1), which ships with Windows 10/11 and requires no additional installation. Files are placed on the clipboard as a `CF_HDROP` file drop list, the same format used by Explorer, so yanked files can be pasted directly into Explorer, VS Code, and other apps with Ctrl+V.
+| Windows | Built-in `powershell.exe` | Built-in `powershell.exe` |
 
 ## Installation
 
 Install the plugin via the package manager:
 
-```
+```bash
 ya pkg add XYenon/clipboard
 ```
 
@@ -64,14 +62,13 @@ run = [ "yank", 'plugin clipboard -- --action=copy --notify-unknown-display-serv
 - **`Copy failed: xclip/wl-copy not found`**: install `xclip` for X11 or `wl-clipboard` (`wl-copy`) for Wayland.
 - **`Paste failed: xclip/wl-paste not found`**: install `xclip` for X11 or `wl-clipboard` (`wl-paste`) for Wayland.
 - **`Unknown display server`**: ensure Yazi runs in a Wayland or X11 session. Enable `notify-unknown-display-server` to surface a visible warning.
-- **Windows: `Copy failed: powershell failed`**: ensure `powershell.exe` is on your `PATH`. It ships at `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` on all Windows 10/11 installations. If you are running Yazi inside WSL, the Linux code paths apply instead.
-- **Windows: pasted files appear as copies, not moves**: `CF_HDROP` carries copy semantics by default. Cut-and-move is not currently supported on Windows (the same limitation applies to the macOS backend).
+- **`powershell.exe not found`**: ensure `%SystemRoot%\System32\WindowsPowerShell\v1.0` is on your `PATH`.
 
 ## Development
 
 This repository uses [treefmt](https://github.com/numtide/treefmt) for formatting:
 
-```
+```bash
 nix fmt
 ```
 

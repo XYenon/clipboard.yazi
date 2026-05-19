@@ -50,6 +50,8 @@ function M:copy()
 		end
 	elseif ya.target_os() == "macos" then
 		cmd, err = self:copy_macos_cmd()
+	elseif ya.target_os() == "windows" then
+		cmd, err = self:copy_windows_cmd(args)
 	else
 		err = "Unsupported OS: " .. ya.target_os()
 	end
@@ -61,6 +63,27 @@ function M:copy()
 	end
 
 	ya.dbg("Clipboard", "cmd", cmd)
+
+	if ya.target_os() == "windows" then
+    	local output, err = Command("powershell.exe")
+    		:arg({ "-NoProfile", "-NonInteractive", "-Sta", "-Command", cmd })
+    		:stdout(Command.PIPED)
+    		:stderr(Command.PIPED)
+    		:output()
+    	if err then
+    		ya.err("Clipboard", "cmd failed", err)
+    		return self:notify_error("Run command failed: " .. tostring(err))
+    	end
+		if not output or not output.status.success then
+			ya.err("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
+			return self:notify_error(
+				"Run command failed: powershell exited with code " .. tostring(output and output.status.code)
+			)
+		end
+		ya.dbg("Clipboard", "cmd output", output.status.code, output.stdout, output.stderr)
+		return
+	end
+
 	local cmd = Command("sh"):arg({ "-c", cmd, "--" }):arg(args)
 
 	-- On Wayland, wl-copy forks to background but keeps stderr open,
@@ -172,12 +195,42 @@ function M:copy_wayland_cmd()
 	return [[printf '%s\r\n' "$@" | wl-copy -t text/uri-list]], nil
 end
 
+function M:copy_windows_cmd(paths)
+	local tmp = os.getenv("TEMP") .. "\\clipboard_yazi_" .. os.time() .. ".txt"
+	local f = io.open(tmp, "w")
+	if not f then
+		return nil, "Failed to create temp file: " .. tmp
+	end
+	f:write(table.concat(paths, "\n"))
+	f:close()
+
+	local tmp_ps = tmp:gsub("'", "''")
+	local cmd = string.format(
+		[[
+Add-Type -AssemblyName System.Windows.Forms
+$col = [System.Collections.Specialized.StringCollection]::new()
+Get-Content '%s' | ForEach-Object {
+  if ($_.Length -gt 0) {
+    $null = $col.Add($_)
+  }
+}
+Remove-Item '%s' -ErrorAction SilentlyContinue
+[System.Windows.Forms.Clipboard]::SetFileDropList($col)
+]],
+		tmp_ps,
+		tmp_ps
+	)
+	return cmd, nil
+end
+
 function M:paste()
 	local paths, err = nil, nil
 	if ya.target_os() == "linux" then
 		paths, err = self:paste_linux()
 	elseif ya.target_os() == "macos" then
 		paths, err = self:paste_macos()
+	elseif ya.target_os() == "windows" then
+		paths, err = self:paste_windows()
 	else
 		err = "Unsupported OS: " .. ya.target_os()
 	end
@@ -199,7 +252,8 @@ function M:paste()
 	local errors = {}
 	local apply_all = nil
 	for _, src in ipairs(paths) do
-		local name = src:match("[^/]+$")
+		-- Match the last path component, accepting both / (Unix) and \ (Windows).
+		local name = src:match("[^\\/]+$")
 		if name then
 			local dest_url = cwd_url:join(name)
 			local dest = tostring(dest_url)
@@ -435,6 +489,41 @@ function M:paste_wayland()
 		return {}, nil
 	end
 	return self:parse_uri_list(output.stdout), nil
+end
+
+function M:paste_windows()
+	local cmd = Command("powershell.exe"):arg({
+		"-NoProfile",
+		"-NonInteractive",
+		"-Sta",
+		"-Command",
+		[[
+Add-Type -AssemblyName System.Windows.Forms
+$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+if ($files.Count -gt 0) {
+  @($files) -join [char]10
+}
+]],
+	})
+	local output, err = cmd:output()
+	if err then
+		return nil, "powershell failed: " .. tostring(err)
+	end
+	if not output or not output.status.success then
+		return nil, "powershell exited with code " .. tostring(output and output.status.code)
+	end
+
+	local stdout = (output.stdout or ""):gsub("%s+$", "")
+	if stdout == "" then
+		return {}, nil
+	end
+	local paths = {}
+	for line in stdout:gmatch("[^\r\n]+") do
+		if line ~= "" then
+			table.insert(paths, line)
+		end
+	end
+	return paths, nil
 end
 
 function M:parse_uri_list(text)

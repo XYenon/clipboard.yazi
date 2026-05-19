@@ -10,6 +10,7 @@
 ---@class ClipboardRunCommandOpts
 ---@field stdout? Stdio
 ---@field stderr? Stdio
+---@field allow_failure? boolean
 
 ---@alias ClipboardDisplayServer "x11"|"wayland"|"unknown"
 ---@alias ClipboardConflictChoice "overwrite"|"rename"|"skip"
@@ -197,44 +198,26 @@ function M:run_command(program, args, opts)
 		return nil, "Run command failed: " .. tostring(err)
 	end
 	if not (output and output.status.success) then
+		if opts.allow_failure then
+			return output, nil
+		end
 		if output then
 			ya.err("Clipboard", program .. " failed", output.status.code, output.stdout, output.stderr)
 		end
-		return nil,
-			"Run command failed: "
-				.. program
-				.. " exited with code "
-				.. tostring(output and output.status.code)
-				.. ", stdout: "
-				.. tostring(output and output.stdout)
-				.. ", stderr: "
-				.. tostring(output and output.stderr)
+		return nil, "Run command failed: " .. program .. " exited with code " .. tostring(output and output.status.code)
 	end
 	return output, nil
-end
-
----@param program string
----@return boolean
-function M:command_exists(program)
-	local output = self:run_command("which", program)
-	return output ~= nil
 end
 
 ---@return string? cmd
 ---@return string? err
 function M:copy_x11_cmd()
-	if not self:command_exists("xclip") then
-		return nil, "xclip not found"
-	end
 	return [[printf '%s\r\n' "$@" | xclip -i -selection clipboard -t text/uri-list]], nil
 end
 
 ---@return string? cmd
 ---@return string? err
 function M:copy_wayland_cmd()
-	if not self:command_exists("wl-copy") then
-		return nil, "wl-copy not found"
-	end
 	return [[printf '%s\r\n' "$@" | wl-copy -t text/uri-list]], nil
 end
 
@@ -492,7 +475,7 @@ return pathList as text
 		return nil, err
 	end
 
-	local stdout = (output.stdout or ""):gsub("%s+$", "")
+	local stdout = (output and output.stdout or ""):gsub("%s+$", "")
 	if stdout == "" then
 		return {}, nil
 	end
@@ -521,12 +504,16 @@ end
 ---@return string[]? paths
 ---@return string? err
 function M:paste_x11()
-	if not self:command_exists("xclip") then
-		return nil, "xclip not found"
-	end
-	local output, err = self:run_command("xclip", { "-o", "-selection", "clipboard", "-t", "text/uri-list" })
+	local output, err = self:run_command(
+		"xclip",
+		{ "-o", "-selection", "clipboard", "-t", "text/uri-list" },
+		{ allow_failure = true }
+	)
 	if err then
 		return nil, err
+	end
+	if not (output and output.status.success) then
+		return {}, nil
 	end
 	return self:parse_uri_list(output.stdout), nil
 end
@@ -534,12 +521,12 @@ end
 ---@return string[]? paths
 ---@return string? err
 function M:paste_wayland()
-	if not self:command_exists("wl-paste") then
-		return nil, "wl-paste not found"
-	end
-	local output, err = self:run_command("wl-paste", { "-t", "text/uri-list" })
+	local output, err = self:run_command("wl-paste", { "-t", "text/uri-list" }, { allow_failure = true })
 	if err then
 		return nil, err
+	end
+	if not (output and output.status.success) then
+		return {}, nil
 	end
 	return self:parse_uri_list(output.stdout), nil
 end
@@ -564,7 +551,7 @@ if ($files.Count -gt 0) {
 		return nil, err
 	end
 
-	local stdout = (output.stdout or ""):gsub("%s+$", "")
+	local stdout = (output and output.stdout or ""):gsub("%s+$", "")
 	if stdout == "" then
 		return {}, nil
 	end

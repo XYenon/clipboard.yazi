@@ -8,6 +8,7 @@
 ---@field args ClipboardJobArgs
 
 ---@class ClipboardRunCommandOpts
+---@field capture_output? boolean
 ---@field stdout? Stdio
 ---@field stderr? Stdio
 ---@field allow_failure? boolean
@@ -104,18 +105,19 @@ function M:copy()
 	end
 
 	-- On Wayland, wl-copy forks to background but keeps stderr open,
-	-- causing output() to block until the forked process exits.
-	-- Set stdout/stderr NULL to avoid blocking.
+	-- causing output() to block until the forked process exits. Command:output()
+	-- always pipes stdout/stderr, so use spawn()/wait() instead.
+	local run_opts = nil
 	if ya.target_os() == "linux" and self:linux_display_server() == "wayland" then
-		local _, err = self:run_command("sh", sh_args, { stdout = Command.NULL, stderr = Command.NULL })
-		if err then
-			return self:notify_error(err)
-		end
-	else
-		local _, err = self:run_command("sh", sh_args)
-		if err then
-			return self:notify_error(err)
-		end
+		run_opts = {
+			capture_output = false,
+			stdout = Command.NULL,
+			stderr = Command.NULL,
+		}
+	end
+	local _, err = self:run_command("sh", sh_args, run_opts)
+	if err then
+		return self:notify_error(err)
 	end
 end
 
@@ -187,26 +189,49 @@ end
 ---@return string? err
 function M:run_command(program, args, opts)
 	opts = opts or {}
-	local cmd = Command(program):stdout(opts.stdout or Command.PIPED):stderr(opts.stderr or Command.PIPED)
+	local cmd = Command(program)
 	if args then
 		cmd = cmd:arg(args)
 	end
 
-	local output, err = cmd:output()
+	local output, err
+	if opts.capture_output == false then
+		if opts.stdout then
+			cmd = cmd:stdout(opts.stdout)
+		end
+		if opts.stderr then
+			cmd = cmd:stderr(opts.stderr)
+		end
+
+		local child
+		child, err = cmd:spawn()
+		if not err then
+			local status
+			status, err = child:wait()
+			if not err then
+				output = { status = status, stdout = "", stderr = "" }
+			end
+		end
+	else
+		output, err = cmd:output()
+	end
+
 	if err then
 		ya.err("Clipboard", program .. " failed", err)
 		return nil, "Run command failed: " .. tostring(err)
 	end
-	if not (output and output.status.success) then
-		if opts.allow_failure then
-			return output, nil
-		end
-		if output then
-			ya.err("Clipboard", program .. " failed", output.status.code, output.stdout, output.stderr)
-		end
-		return nil, "Run command failed: " .. program .. " exited with code " .. tostring(output and output.status.code)
+
+	local status = output and output.status
+	if status and status.success then
+		return output, nil
 	end
-	return output, nil
+	if opts.allow_failure then
+		return output, nil
+	end
+	if output then
+		ya.err("Clipboard", program .. " failed", status and status.code, output.stdout, output.stderr)
+	end
+	return nil, "Run command failed: " .. program .. " exited with code " .. tostring(status and status.code)
 end
 
 ---@return string? cmd

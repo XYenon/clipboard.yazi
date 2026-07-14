@@ -39,7 +39,7 @@ desc = "Yank selected files (copy)"
 
 # Keep behaviour consistent with cut
 [[mgr.prepend_keymap]]
-on  = "y"
+on  = "x"
 run = [ "yank --cut", 'plugin clipboard -- --action=copy' ]
 desc = "Yank selected files (cut)"
 

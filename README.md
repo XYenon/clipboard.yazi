@@ -35,11 +35,19 @@ Add shortcuts in `~/.config/yazi/keymap.toml`:
 [[mgr.prepend_keymap]]
 on  = "y"
 run = [ "yank", 'plugin clipboard -- --action=copy' ]
+desc = "Yank selected files (copy)"
+
+# Keep behaviour consistent with cut
+[[mgr.prepend_keymap]]
+on  = "x"
+run = [ "yank --cut", 'plugin clipboard -- --action=copy' ]
+desc = "Yank selected files (cut)"
 
 # Paste files from the system clipboard into the current directory
 [[mgr.prepend_keymap]]
 on  = "<C-p>"
 run = [ 'plugin clipboard -- --action=paste' ]
+desc = "Paste yanked system clipboard files"
 ```
 
 ## Optional arguments

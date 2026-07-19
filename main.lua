@@ -21,12 +21,17 @@
 local get_yanked_paths = ya.sync(function(state)
 	local paths = {}
 	for _, v in pairs(cx.yanked) do
-		local is_regular = v.spec and v.spec.is_regular or v.is_regular
-		ya.dbg("Clipboard", "check yanked", { path = tostring(v), is_regular = is_regular, has_spec = not not v.spec })
+		local url = v.url or v
+		local is_regular = url.spec and url.spec.is_regular or url.is_regular
+		ya.dbg(
+			"Clipboard",
+			"check yanked",
+			{ path = tostring(url), is_regular = is_regular, has_spec = not not url.spec }
+		)
 		if not is_regular then
 			goto continue
 		end
-		table.insert(paths, tostring(v))
+		table.insert(paths, tostring(url))
 		::continue::
 	end
 	return paths

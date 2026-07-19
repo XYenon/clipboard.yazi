@@ -21,7 +21,8 @@
 local get_yanked_paths = ya.sync(function(state)
 	local paths = {}
 	for _, v in pairs(cx.yanked) do
-		if not v.is_regular then
+		local is_regular = v.spec and v.spec.is_regular or v.is_regular
+		if not is_regular then
 			goto continue
 		end
 		table.insert(paths, tostring(v))

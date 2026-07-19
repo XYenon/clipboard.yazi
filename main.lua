@@ -22,6 +22,7 @@ local get_yanked_paths = ya.sync(function(state)
 	local paths = {}
 	for _, v in pairs(cx.yanked) do
 		local is_regular = v.spec and v.spec.is_regular or v.is_regular
+		ya.dbg("Clipboard", "check yanked", { path = tostring(v), is_regular = is_regular, has_spec = not not v.spec })
 		if not is_regular then
 			goto continue
 		end
@@ -60,6 +61,12 @@ end
 
 ---@return nil
 function M:copy()
+	local display_server = "unknown"
+	if ya.target_os() == "linux" then
+		display_server = self:linux_display_server()
+	end
+	ya.dbg("Clipboard", "os", ya.target_os(), "display_server", display_server)
+
 	local paths = get_yanked_paths()
 	ya.dbg("Clipboard", "files", paths)
 	if #paths == 0 then
@@ -83,10 +90,14 @@ function M:copy()
 	else
 		err = "Unsupported OS: " .. ya.target_os()
 	end
-	if not self.notify_unknown_display_server and err == "Unknown display server" then
-		return
+	if err == "Unknown display server" then
+		ya.dbg("Clipboard", "Unknown display server detected")
+		if not self.notify_unknown_display_server then
+			return
+		end
 	end
 	if err then
+		ya.err("Clipboard", "Copy failed", err)
 		return self:notify_error("Copy failed: " .. err)
 	end
 

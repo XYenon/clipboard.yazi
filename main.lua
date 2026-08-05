@@ -22,7 +22,12 @@ local get_yanked_paths = ya.sync(function(state)
 	local paths = {}
 	for _, v in pairs(cx.yanked) do
 		local url = v.url or v
-		local is_regular = url.spec and url.spec.is_regular or url.is_regular
+		local is_regular
+		if url.spec then
+			is_regular = url.spec.is_regular
+		else
+			is_regular = url.is_regular
+		end
 		ya.dbg(
 			"Clipboard",
 			"check yanked",

@@ -290,7 +290,7 @@ Get-Content -LiteralPath '%s' -Encoding UTF8 | ForEach-Object {
     $null = $col.Add($_)
   }
 }
-Remove-Item '%s' -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '%s' -ErrorAction SilentlyContinue
 [System.Windows.Forms.Clipboard]::SetFileDropList($col)
 ]],
 		tmp_ps,

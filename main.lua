@@ -285,12 +285,12 @@ function M:copy_windows_cmd(paths)
 		[[
 Add-Type -AssemblyName System.Windows.Forms
 $col = [System.Collections.Specialized.StringCollection]::new()
-Get-Content '%s' | ForEach-Object {
+Get-Content -LiteralPath '%s' -Encoding UTF8 | ForEach-Object {
   if ($_.Length -gt 0) {
     $null = $col.Add($_)
   }
 }
-Remove-Item '%s' -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '%s' -ErrorAction SilentlyContinue
 [System.Windows.Forms.Clipboard]::SetFileDropList($col)
 ]],
 		tmp_ps,

@@ -285,7 +285,7 @@ function M:copy_windows_cmd(paths)
 		[[
 Add-Type -AssemblyName System.Windows.Forms
 $col = [System.Collections.Specialized.StringCollection]::new()
-Get-Content '%s' | ForEach-Object {
+Get-Content -LiteralPath '%s' -Encoding UTF8 | ForEach-Object {
   if ($_.Length -gt 0) {
     $null = $col.Add($_)
   }

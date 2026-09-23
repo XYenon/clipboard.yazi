@@ -3,6 +3,7 @@
 ---@class ClipboardJobArgs
 ---@field action string
 ---@field notify_unknown_display_server? boolean
+---@field disable_notifications? boolean
 
 ---@class ClipboardJob
 ---@field args ClipboardJobArgs
@@ -50,8 +51,10 @@ end)
 
 ---@class ClipboardPlugin
 ---@field notify_unknown_display_server boolean
+---@field disable_notifications boolean
 local M = {
 	notify_unknown_display_server = false,
+	disable_notifications = false,
 }
 
 ---@param job ClipboardJob
@@ -59,6 +62,7 @@ local M = {
 function M:entry(job)
 	ya.dbg("Clipboard", "args", job.args)
 	self.notify_unknown_display_server = job.args.notify_unknown_display_server or false
+	self.disable_notifications = job.args.disable_notifications or false
 
 	if job.args.action == "copy" then
 		return self:copy()
@@ -360,7 +364,7 @@ function M:paste()
 		end
 	end
 
-	if copied > 0 or skipped > 0 then
+	if not self.disable_notifications and (copied > 0 or skipped > 0) then
 		local parts = {}
 		if copied > 0 then
 			table.insert(parts, "Pasted " .. copied .. " file(s)")

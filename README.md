@@ -52,17 +52,21 @@ desc = "Paste yanked system clipboard files"
 
 ## Optional arguments
 
-The plugin accepts the boolean argument `notify-unknown-display-server`:
+The plugin accepts the following boolean arguments:
 
-- Default `false`: silently exit when the Linux display server is unknown (useful for TTY or remote sessions).
-- `true`: show a notification to warn that the operation is unavailable in the current session.
+- `notify-unknown-display-server`
+  - Default `false`: silently exit when the Linux display server is unknown (useful for TTY or remote sessions).
+  - `true`: show a notification to warn that the operation is unavailable in the current session.
+- `disable-paste-notifications`
+  - Default `false`: show a notification to confirm a successful paste.
+  - `true`: no notification shown after a successful paste.
 
 Example invocation:
 
 ```toml
 [[mgr.prepend_keymap]]
 on  = "y"
-run = [ "yank", 'plugin clipboard -- --action=copy --notify-unknown-display-server' ]
+run = [ "yank", 'plugin clipboard -- --action=copy --notify-unknown-display-server --disable-paste-notifications' ]
 ```
 
 ## Troubleshooting

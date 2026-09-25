@@ -61,12 +61,20 @@ The plugin accepts the following boolean arguments:
   - Default `false`: show a notification to confirm a successful paste.
   - `true`: no notification shown after a successful paste.
 
-Example invocation:
+Example invocations:
 
 ```toml
+# Warn when the Linux display server is unknown (applies to copy and paste)
 [[mgr.prepend_keymap]]
 on  = "y"
-run = [ "yank", 'plugin clipboard -- --action=copy --notify-unknown-display-server --disable-paste-notifications' ]
+run = [ "yank", 'plugin clipboard -- --action=copy --notify-unknown-display-server' ]
+desc = "Yank selected files (copy)"
+
+# Skip the success notification after pasting
+[[mgr.prepend_keymap]]
+on  = "<C-p>"
+run = [ 'plugin clipboard -- --action=paste --disable-paste-notifications' ]
+desc = "Paste yanked system clipboard files"
 ```
 
 ## Troubleshooting

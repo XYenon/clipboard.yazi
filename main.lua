@@ -17,6 +17,13 @@
 ---@alias ClipboardDisplayServer "x11"|"wayland"|"unknown"
 ---@alias ClipboardConflictChoice "overwrite"|"rename"|"skip"
 
+-- Yazi delivers a bare `--flag` as boolean true, and `--flag=value` as a string.
+---@param value unknown
+---@return boolean
+local function to_boolean(value)
+	return value == true or value == "true"
+end
+
 ---@param state table
 ---@return string[]
 local get_yanked_paths = ya.sync(function(state)
@@ -61,8 +68,8 @@ local M = {
 ---@return nil
 function M:entry(job)
 	ya.dbg("Clipboard", "args", job.args)
-	self.notify_unknown_display_server = job.args.notify_unknown_display_server or false
-	self.disable_paste_notifications = job.args.disable_paste_notifications or false
+	self.notify_unknown_display_server = to_boolean(job.args.notify_unknown_display_server)
+	self.disable_paste_notifications = to_boolean(job.args.disable_paste_notifications)
 
 	if job.args.action == "copy" then
 		return self:copy()

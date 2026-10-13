@@ -30,21 +30,23 @@ local get_yanked_paths = ya.sync(function(state)
 	local paths = {}
 	for _, v in pairs(cx.yanked) do
 		local url = v.url or v
+		local path = tostring(url)
 		local is_regular
 		if url.spec then
 			is_regular = url.spec.is_regular
+			-- A file in a search view has a search URL. Its path is the real file on disk.
+			if url.spec.is_search then
+				is_regular = true
+				path = tostring(url.path)
+			end
 		else
 			is_regular = url.is_regular
 		end
-		ya.dbg(
-			"Clipboard",
-			"check yanked",
-			{ path = tostring(url), is_regular = is_regular, has_spec = not not url.spec }
-		)
+		ya.dbg("Clipboard", "check yanked", { path = path, is_regular = is_regular, has_spec = not not url.spec })
 		if not is_regular then
 			goto continue
 		end
-		table.insert(paths, tostring(url))
+		table.insert(paths, path)
 		::continue::
 	end
 	return paths
